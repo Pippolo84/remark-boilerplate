@@ -808,9 +808,7 @@ _PyObject_GC_Alloc(int use_calloc, size_t basicsize)
     size_t size;
 
     ...
-
     size = sizeof(PyGC_Head) + basicsize;
-
     ...
 
     g = (PyGC_Head *)PyObject_Malloc(size);
@@ -970,7 +968,8 @@ collect(int generation, Py_ssize_t *n_collected, Py_ssize_t *n_uncollectable,
 To break reference cycles, the algorithm acts this way
 
 - iterate over all objects in the `young` list
-- for each object, traverse all its reference, and for each of these, decrement by one the `gc_refs` field of the referenced object
+- for each object, traverse all its reference
+- for each referenced object that is in the `young` list, decrease its `gc_refs` by 1
 
 ---
 
@@ -1053,7 +1052,7 @@ static int visit_decref(PyObject *op, void *data)
 
 When the traversal is complete for all objs, in `young` list we'll end up with two kind of objects:
 - objs with reference count > 0    
-    these objs are surely reachable from outside the `young` list, so they won't be garbage collected
+    these objs are surely reachable from outside the `young` list, so they will be promoted to the older generation
 - objs with reference count == 0
     these objects **may** be unreachable from outside, so they are now eligible to be garbage collected
 
@@ -1273,13 +1272,13 @@ The growing leaked memory forced them to restart the server periodically, washin
 
 ---
 
-## second attempt: gc_freeze
+## second attempt: gc.freeze()
 
 Objective:
 - do not poke objects allocated before fork (objects in parent process)
 - continue to collect all objects allocated after fork (objects in child processes)
 
-Zekun Li, a sw eng from Instagram, contributed a patch to Python 3.7 to introduce `gc_freeze`
+Zekun Li, a sw eng from Instagram, contributed a patch to Python 3.7 to introduce `gc.freeze()`
 
 ```c
 static PyObject * gc_freeze_impl(PyObject *module)
