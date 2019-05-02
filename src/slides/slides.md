@@ -571,29 +571,13 @@ Specifically, every gc tracked object is linked in a doubly-linked list through 
 </small>
 
 ```c
-/* GC information is stored BEFORE the object structure. */
 typedef struct {
-    // Pointer to next object in the list.
-    // 0 means the object is not tracked
     uintptr_t _gc_next;
-
-    // Pointer to previous object in the list.
-    // Lowest two bits are used for flags documented later.
     uintptr_t _gc_prev;
 } PyGC_Head;
 ```
 
-<small>
-We can go from a `PyObject *` to a `PyGC_Head *` with the help of these two macros
-</small>
-
-```c
-/* Get an object's GC head */
-#define AS_GC(o) ((PyGC_Head *)(o)-1)
-
-/* Get the object given the GC head */
-#define FROM_GC(g) ((PyObject *)(((PyGC_Head *)g)+1))
-```
+.center[![Centered image](./img/PyGC_Head.png)]
 
 ---
 
@@ -856,11 +840,22 @@ class: center, middle, inverse
 
 ---
 
+## Cycle detection algorithm: the 30k foot view
+
+To break reference cycles, the algorithm acts this way
+
+- iterate over all objects in the `young` list
+- for each object, traverse all its reference
+- for each referenced object that is in the `young` list, decrease its `gc_refs` by 1
+
+.center[![Centered image](./img/cycle_detection_algorithm.png)]
+
+---
+
 ## collect_generations
 
 <small>
 - find the oldest generation where the count exceeds the threshold
-- collect objects from that generation and from all younger generations
 - in case of use <em>full collections</em> apply the heuristic on `long_lived_pending` and `long_lived_total` values
 
 </small>
@@ -893,13 +888,17 @@ collect_generations(void)
 
 ## gc module workhorse: the collect function
 
-<small>
-- `update_refs()`
-- `subtract_refs()`
-- `move_unreachable()`
-- `check_garbage()` and `delete_garbage()`
+- merge target generation with all younger ones to form the `young` list
+- executes the cycle detection algorithm
+    - leaving reachable object in `young` list
+    - moving unreachable objects into the `unreachable` list
+- merge `young` list into next generation
+- executes all finalizers of the `unreachable` objects
+- executes the appropriate `clear` function on the `unreachable` objects
 
-</small>
+---
+
+## gc module workhorse: the collect function
 
 ```c
 static Py_ssize_t
@@ -907,69 +906,26 @@ collect(int generation, Py_ssize_t *n_collected, Py_ssize_t *n_uncollectable,
         int nofail)
 {
     ...
-
     /* merge younger generations with one we are currently collecting */
-    for (i = 0; i < generation; i++) {
-        gc_list_merge(GEN_HEAD(i), GEN_HEAD(generation));
-    }
-
     ...
-
-    /* 
-     * Using ob_refcnt and gc_refs, calculate which objects in the
-     * container set are reachable from outside the set.
-     */
     update_refs(young);  // gc_prev is used for gc_refs
     subtract_refs(young);
-
     ...
-```
-
----
-
-## gc module workhorse: the collect function
-
-```c
-    ...
-
-    /* Leave everything reachable from outside young in young, and move
-     * everything else (in young) to unreachable.
-     */
-    gc_list_init(&unreachable);
     move_unreachable(young, &unreachable);  // gc_prev is pointer again
 
     /* Move reachable objects to next generation. */
-    if (young != old) {
-        if (generation == NUM_GENERATIONS - 2) {
-            _PyRuntime.gc.long_lived_pending += gc_list_size(young);
-        }
-        gc_list_merge(young, old);
-    }
+    ...
+    gc_list_merge(young, old);
 
     if (check_garbage(&unreachable)) { // clear PREV_MASK_COLLECTING here
         gc_list_merge(&unreachable, old);
     }
     else {
-        /* 
-         * Call tp_clear on objects in the unreachable set.  This will cause
-         * the reference cycles to be broken.
-         */
         delete_garbage(&unreachable, old);
     }
-
     ...
 }
 ```
-
----
-
-## Cycle detection algorithm: the 30k foot view
-
-To break reference cycles, the algorithm acts this way
-
-- iterate over all objects in the `young` list
-- for each object, traverse all its reference
-- for each referenced object that is in the `young` list, decrease its `gc_refs` by 1
 
 ---
 
@@ -1225,6 +1181,8 @@ It is a kernel optimization to avoid unnecessary memory copy
 
 As a result, the memory page is copied by the kernel only when needed
 
+.center[![Centered image](./img/CoW.png)]
+
 ---
 
 ## Instagram tech stack
@@ -1323,6 +1281,8 @@ That's why the PyPy garbage collector has been called **incminimark**.
 
 Each gc piece (be it a mark or a sweep one) is executed after a minor collection, until the major collection process is complete.
 
+.center[![Centered image](./img/incminimark.png)]
+
 There is one problem, though...
 
 --
@@ -1358,19 +1318,26 @@ In an incremental GC, we define three types of object sets:
 - The **grey** set    
     It contains all objects reachable, but still not entirely scanned for references to white objects
 
---
+---
 
+## Tri-color marking
+
+<small>
 During the **tri-color** marking phase, objects:
 
 - start as white at the beginning
 - become grey when they are found to be alive
 - finally become black when all their references have been traversed
 
+</small>
+
+.center[![Centered image](./img/tricolor_marking.png)]
+
 --
 
-In other words, the coloring of an object follows this order:
-
-**white ⭢ grey ⭢ black**
+<small>
+In other words, the coloring of an object always follows this order: **white ⭢ grey ⭢ black**
+</small>
 
 ---
 
