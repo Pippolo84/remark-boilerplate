@@ -252,7 +252,7 @@ class: center, middle, inverse
 
 CPython adds to the reference counting, another garbage collector to deal with cyclic references
 
-That additional GC is a form of <em>tracing garbage collection</em>. As such, it consists of threee phases:
+That additional GC is a form of <em>tracing garbage collection</em>. As such, it consists of three phases:
 
 1. Scan
 2. Mark
