@@ -772,7 +772,9 @@ typedef struct {
 
 The `collect` function uses `_gc_prev` to store a copy of the `ob_refcnt` for **each** container object, and run its cycle detection algorithm
 
-Whenever a gc collection starts after a fork, the algorithm causes **a lot** of memory writes, thus a lot of page faults and, finally, a lot of memory copying after uWSGI fork!
+Whenever a gc collection starts after a fork...
+
+the cycle detection algorithm causes a lot of **memory writes**, thus a lot of **page faults** and, finally, a lot of **memory copying** after uWSGI fork!
 
 ---
 
@@ -886,7 +888,7 @@ During the **tri-color** marking phase, objects:
 --
 
 <small>
-In other words, the coloring of an object always follows this order: **white ⭢ grey ⭢ black**
+In other words, the coloring of an object always follows this order: **white --> grey --> black**
 </small>
 
 ---
@@ -977,7 +979,7 @@ Don't miss my talk on the topic at Golab 2019! ;-)
 
 class: center, middle, inverse
 
-# Thank you for your time!
+# Thank you for your attention!
 
 ---
 
