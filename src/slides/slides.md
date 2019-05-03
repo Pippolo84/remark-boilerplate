@@ -401,7 +401,7 @@ During a collection, `_gc_prev` is temporary used for storing `gc_refs`, that is
 
 ---
 
-## Quick quiz #4:
+## Quick quiz #3:
 
 Why CPython uses the same field `_gc_prev` both as a pointer and as a reference counter?
 
@@ -626,7 +626,7 @@ When the traversal is complete for all objs, in `young` list we'll end up with t
 
 ---
 
-## Quick Quiz #5: still reachable objs
+## Quick Quiz #4: still reachable objs
 During the visit of each object we decrease `gc_refs`, not `ob_refcnt` to avoid triggering an immediate memory reclaim.
 
 Can you figure out why some objects with reference count == 0 may still end up as reachable?
