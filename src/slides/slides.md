@@ -393,11 +393,11 @@ typedef struct {
 
 ## _gc_prev field
 
-When not collecting, `_gc_prev` is to link container objects in a doubly linked list
+When not collecting, `_gc_prev` is used to link container objects in a doubly linked list
 
-Lowest two bits of `_gc_prev` are used for flags. The most important one is `PREV_MASK_COLLECTING`, which is set when the object is undergoing a collection and cleared once the cycle detection algorithm ends.
+During a collection, `_gc_prev` is temporary used for storing `gc_refs`, the current value of `ob_refcnt`
 
-During a collection, `_gc_prev` is temporary used for storing `gc_refs`, that is the current value of `ob_refcnt`.
+Cycle detection algorithm needs the `gc_refs` value to operate!
 
 ---
 
@@ -981,14 +981,14 @@ class: center, middle, inverse
 
 ---
 
+class: center, middle, inverse
+
+# Question Time
+
+---
+
 ## I'd love to hear from you
 
 - fabio.falzoi84 {gmail.com}
 - github: https://github.com/Pippolo84
 - **extended version** of this talk: https://github.com/Pippolo84/an-insight-into-python-garbage-collection
-
----
-
-class: center, middle, inverse
-
-# Question Time
