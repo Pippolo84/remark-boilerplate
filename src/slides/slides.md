@@ -6,12 +6,9 @@ class: center, middle, inverse
 ---
 
 ## $ whoami
-- full stack developer @ SpazioDati s.r.l.
+- full stack developer @ **SpazioDati s.r.l.**
 - happy Python user since 2014
 - ~3 (scattered) years of professional Python experience
-
-???
-fabio.falzoi84 {gmail.com}
 
 ---
 
@@ -152,56 +149,6 @@ static inline void _Py_DECREF(const char *filename, int lineno, PyObject *op)
 
 ---
 
-## Tinkering with the Python C API
-
-The Application Programmer’s Interface to Python gives C programmers access to the Python interpreter
-
-The most common use of the Python C API is to write extension modules for specific purposes
-
-We'll leverage the Python C API to demostrate how a leak can occur if the reference count doesn't hit 0
-
----
-
-## A leaking extension
-
-Correct and incorrect use of `pObj` reference
-
-```c
-static PyObject *
-cPyRefs_good_incref(PyObject *pModule, PyObject *pObj)
-{
-    PySys_WriteStdout("cPyRefs_good_incref\n");
-    Py_INCREF(pObj);
-
-    // use pObj
-
-    Py_DECREF(pObj);
-    Py_RETURN_NONE;
-}
-
-```
-
-```c
-static PyObject *
-cPyRefs_bad_incref(PyObject *pModule, PyObject *pObj)
-{
-    PySys_WriteStdout("cPyRefs_bad_incref\n");
-    Py_INCREF(pObj);
-
-    // use pObj
-
-    Py_RETURN_NONE;
-}
-```
-
----
-
-class: center, middle, inverse
-
-# Demo time!
-
----
-
 ## The good, the bad and the ugly about reference counting
 
 **Good**
@@ -269,29 +216,6 @@ Therefore, we may end up **referencing memory already freed** and all sorts of (
 class: center, middle, inverse
 
 # Solution: the Python's <em>infamous</em> GIL
-
----
-
-## Global Interpreter Lock
-<em>One single lock to be held to interact with the Python interpreter in any way</em>
-
-e.g. run bytecode, allocate memory, call any C API and so on...
-
-Pros
-- easy to get right
-- no deadlocks possible
-- good I/O bound multithreads performance
-
-Cons
-- bad CPU bound multithreads performance
-
---
-
-But please, don't hold a grudge against the GIL...
-
-<em>"The design decision of the GIL is one of the things that made Python as popular as it is today"</em>
-
-&minus; Larry Hastings &minus;
 
 ---
 
@@ -394,120 +318,6 @@ Younger objects are stored in generation 0 and they are <em>promoted</em> to the
 ---
 
 class: center, middle, inverse
-# Generational garbage collection in action
-
----
-
-## gc module
-
-We can use the ctypes foreign function library to expose `ob_refcnt` for <em>lost</em> Python objects
-
-```python
-import ctypes
-import gc
-
-# disable garbage collection
-gc.disable()
-
-# use ctypes to map PyObject internal struct
-class PyObject(ctypes.Structure):
-	_fields_ = [('ob_refcnt', ctypes.c_ssize_t)]
-
-# create a cyclical reference
-obj_1, obj_2 = {}, {}
-obj_1['next'], obj_2['next'] = obj_2, obj_1
-
-# save objs addresses
-obj_1_addr, obj_2_addr = id(obj_1), id(obj_2)
-
-# unbind obj_1 and obj_2 references
-del obj_1, obj_2
-
-# prove that refcounts are not 0 due to cyclical reference
-print(f'obj_1 refcnt: '
-    '{PyObject.from_address(obj_1_addr).ob_refcnt}')
-print(f'obj_2 refcnt: '
-    '{PyObject.from_address(obj_2_addr).ob_refcnt}')
-```
-
----
-
-## gc module
-
-```python
-# install a callback to get info about gc process
-def gc_info(phase, info):
-    print(f'gc {phase} {info}')
-
-gc.callbacks.append(gc_info)
-
-# trigger generational garbage collector
-gc.collect()
-
-# refcounts are now 0
-print(f'obj_1 refcnt: '
-    '{PyObject.from_address(obj_1_addr).ob_refcnt}')
-print(f'obj_2 refcnt: '
-    '{PyObject.from_address(obj_2_addr).ob_refcnt}')
-```
-
-Executing the script with CPython 3.7.3, we can see how the generational gc collects the two objects
-
-```
-before gc collect
-obj_1 refcount: 1
-obj_2 refcount: 1
-gc start {'generation': 2, 'collected': 0, 'uncollectable': 0}
-gc stop {'generation': 2, 'collected': 2, 'uncollectable': 0}
-after gc collect
-obj_1 refcount: 0
-obj_2 refcount: 0
-```
-
----
-
-## Quick Quiz #3: PyObject and ctypes
-
-<small>
-Consider again the `PyObject` structure
-</small>
-
-```c
-#define _PyObject_HEAD_EXTRA            \
-    struct _object *_ob_next;           \
-    struct _object *_ob_prev;
-
-typedef struct _object {
-    _PyObject_HEAD_EXTRA
-    Py_ssize_t ob_refcnt;
-    struct _typeobject *ob_type;
-} PyObject;
-```
-
-<small>
-and the definition of our ctypes class `PyObject`
-</small>
-
-```python
-class PyObject(ctypes.Structure):
-	_fields_ = [('ob_refcnt', ctypes.c_ssize_t)]
-```
-
-<small>
-Can you figure out why `_PyObject_HEAD_EXTRA` is not mapped with ctypes?
-</small>
-
---
-
-## answer
-
-<small>
-Because `_PyObject_HEAD_EXTRA` expand to nothing if the macro `Py_TRACE_REFS` is not defined!
-</small>
-
----
-
-class: center, middle, inverse
 
 # CPython generational gc internals
 
@@ -589,40 +399,6 @@ Lowest two bits of `_gc_prev` are used for flags. The most important one is `PRE
 
 During a collection, `_gc_prev` is temporary used for storing `gc_refs`, that is the current value of `ob_refcnt`.
 
-???
-FIXME: move this
-
-- `gc_refs`   
-    At the start of a collection, `update_refs()` copies the true refcount
-    to `gc_refs`.
-    `subtract_refs()` adjusts this value so that it equals the number of
-    times an object is referenced directly from outside the generation
-    being collected.
-    This way, the true value of `ob_refcnt` won't be polluted by the generational gc.
-
-- `PREV_MASK_COLLECTING`   
-    Objects in generation being collected are marked as `PREV_MASK_COLLECTING` in
-    `update_refs()`.
-
----
-
-## _gc_next field
-
-`_gc_next` takes these values:
-
-- `0`    
-    The object is not tracked
-
-- `!= 0`    
-    Pointer to the next object in the GC list. Additionally, lowest bit is used temporary for `NEXT_MASK_UNREACHABLE` flag described below.
-
-- `NEXT_MASK_UNREACHABLE`
-   the object is marked as unreachable and so it is a candidate for deallocation
-
-???
-FIXME: move this    
-    `move_unreachable()` then moves objects not reachable (whether directly or indirectly) from outside the generation into an "unreachable" set and set this flag.
-
 ---
 
 ## Quick quiz #4:
@@ -660,48 +436,6 @@ struct gc_generation {
     for generation 0: difference between allocations and deallocations<br>
     for older generations: count of collections completed
     </small>
-
-<small>
-`_PyRuntime.gc.generations[0].count`
-- is incremented in `_PyObject_GC_Alloc`
-- decremented in `PyObject_GC_Del`
-</small>
-
----
-
-## GC internal structs: gc_generations_stats
-
-Struct that holds info about generations statistics
-
-```c
-/* Running stats per generation */
-struct gc_generation_stats {
-    /* total number of collections */
-    Py_ssize_t collections;
-    /* total number of collected objects */
-    Py_ssize_t collected;
-    
-    ...
-};
-```
-
-CPython gives us the possibility to read these statistics
-
-```python
-import gc
-
-gc.disable()
-gc.set_debug(gc.DEBUG_STATS)
-gc.collect()
-```
-
-```
-gc: done, 595 unreachable, 0 uncollectable, 0.0005s elapsed
-gc: collecting generation 2...
-gc: objects in each generation: 0 0 3051
-gc: objects in permanent generation: 0
-gc: done, 151 unreachable, 0 uncollectable, 0.0002s elapsed
-```
 
 ---
 
@@ -772,68 +506,6 @@ PyType_GenericAlloc(PyTypeObject *type, Py_ssize_t nitems)
 
 ---
 
-## PyObject allocation
-
-<small>
-The allocation for the gc tracked objects:
-
-1. adds the useful info for the generational gc to the object itself
-2. update the stats about generations lists
-3. if needed, starts a collection cycle calling `collect_generations` (more on this later)
-
-</small>
-
-```c
-static PyObject *
-_PyObject_GC_Alloc(int use_calloc, size_t basicsize)
-{
-    PyObject *op;
-    PyGC_Head *g;
-    size_t size;
-
-    ...
-    size = sizeof(PyGC_Head) + basicsize;
-    ...
-
-    g = (PyGC_Head *)PyObject_Malloc(size);
-    g->_gc_next = 0;
-    g->_gc_prev = 0;
-
-    // ... update gc stats and triggers a gc collection
-
-    op = FROM_GC(g);
-    return op;
-}
-```
-
----
-
-## A new object is tracked
-
-The newly allocated object is inserted into the generation 0 to be scanned by the cycle detection algorithm
-
-```c
-// Tell the GC to track this object.
-static inline void _PyObject_GC_TRACK_impl(const char *filename,
-                                           int lineno, PyObject *op)
-{
-    ...
-
-    PyGC_Head *gc = _Py_AS_GC(op);
-
-    ...
-
-    PyGC_Head *last = (PyGC_Head*)
-        (_PyRuntime.gc.generation0->_gc_prev);
-    _PyGCHead_SET_NEXT(last, gc);
-    _PyGCHead_SET_PREV(gc, last);
-    _PyGCHead_SET_NEXT(gc, _PyRuntime.gc.generation0);
-    _PyRuntime.gc.generation0->_gc_prev = (uintptr_t)gc;
-}
-```
-
----
-
 class: center, middle, inverse
 
 # Inner details of the collection process
@@ -842,11 +514,11 @@ class: center, middle, inverse
 
 ## Cycle detection algorithm: the 30k foot view
 
-To break reference cycles, the algorithm acts this way
+To break reference cycles on the i-th generation, the algorithm acts this way
 
-- iterate over all objects in the `young` list
+- iterate over all objects in the collection under scanning
 - for each object, traverse all its reference
-- for each referenced object that is in the `young` list, decrease its `gc_refs` by 1
+- for each referenced object that is in the list, decrease its `gc_refs` by 1
 
 .center[![Centered image](./img/cycle_detection_algorithm.png)]
 
@@ -891,7 +563,7 @@ collect_generations(void)
 - merge target generation with all younger ones to form the `young` list
 - executes the cycle detection algorithm
     - leaving reachable object in `young` list
-    - moving unreachable objects into the `unreachable` list
+    - moving **possibly unreachable** objects into the `unreachable` list
 - merge `young` list into next generation
 - executes all finalizers of the `unreachable` objects
 - executes the appropriate `clear` function on the `unreachable` objects
@@ -929,69 +601,9 @@ collect(int generation, Py_ssize_t *n_collected, Py_ssize_t *n_uncollectable,
 
 ---
 
-## Cycle detection algorithm: update_refs
-
-for each container object tracked by the gc:
-- copy `ob_refcnt` into `_gc_prev`
-- set `PREV_MASK_COLLECTING` flag to signal that gc is in progress for the object
-
-```c
-static void
-update_refs(PyGC_Head *containers)
-{
-    PyGC_Head *gc = GC_NEXT(containers);
-    for (; gc != containers; gc = GC_NEXT(gc)) {
-        gc_reset_refs(gc, Py_REFCNT(FROM_GC(gc)));
-
-        ...
-    }
-}
-```
-
----
-
-## Cycle detection algorithm: subtract_refs
-
-<small>
-for each container object tracked by the gc:
-- use the <em>visitor pattern</em> to traverse the container and visit each referenced object
-</small>
-
-```c
-static void subtract_refs(PyGC_Head *containers)
-{
-    traverseproc traverse;
-    PyGC_Head *gc = GC_NEXT(containers);
-    for (; gc != containers; gc = GC_NEXT(gc)) {
-        traverse = Py_TYPE(FROM_GC(gc))->tp_traverse;
-        (void) traverse(FROM_GC(gc),
-                       (visitproc)visit_decref,
-                       NULL);
-    }
-}
-```
-
-<small>
-An example traversal for the `list` type:
-</small>
-
-```c
-static int list_traverse(PyListObject *o, visitproc visit, void *arg)
-{
-    Py_ssize_t i;
-
-    for (i = Py_SIZE(o); --i >= 0; )
-        Py_VISIT(o->ob_item[i]);
-    return 0;
-}
-```
-
----
-
 ## visit_decref: the subtract_refs visitor function
 
-If the object is GC tracked and it belongs to the generation currently under collection,
-we decrement its saved reference count
+Decrement `gc_refs` using the **visitor pattern**
 
 ```c
 static int visit_decref(PyObject *op, void *data)
@@ -1015,6 +627,8 @@ When the traversal is complete for all objs, in `young` list we'll end up with t
 ---
 
 ## Quick Quiz #5: still reachable objs
+During the visit of each object we decrease `gc_refs`, not `ob_refcnt` to avoid triggering an immediate memory reclaim.
+
 Can you figure out why some objects with reference count == 0 may still end up as reachable?
 
 --
@@ -1027,62 +641,24 @@ Since this object is still reachable, the first one is reachable as well!
 **Take-home message**
 
 We'll know which objs can be collected only after a full scan of the `young` list
----
-
-## Cycle detection algorithm: move_unreachable
-
-<small>
-- move all objs with reference count == 0 to the `unreachable` list and set the `NEXT_MASK_UNREACHABLE`
-- leave all reachable objs in `young` list, clearing the `PREV_MASK_COLLECTING` flag
-    - traverse all objs reachable from this object to mark them reachable as well
-- restore `_gc_prev` as a pointer so that `young` and `unreachable` will be both doubly linked
-</small>
-
-```c
-static void move_unreachable(PyGC_Head *young, PyGC_Head *unreachable)
-{
-    while (gc != young) {
-        if (gc_get_refs(gc)) {
-            PyObject *op = FROM_GC(gc);
-            traverseproc traverse = Py_TYPE(op)->tp_traverse;
-            ...
-            (void) traverse(op, (visitproc)visit_reachable, (void *)young);
-            ...
-            // gc is not COLLECTING state after here.
-            gc_clear_collecting(gc);
-            ...
-        }
-        else {
-            // Move gc to unreachable.
-            ...
-            // Set NEXT_MASK_UNREACHABLE flag
-        }
-        gc = (PyGC_Head*)prev->_gc_next;
-    }
-}
-```
 
 ---
 
 ## Cycle detection algorithm: check_garbage
 
-- walk the collectable list and check that they are really unreachable
+Before reclaiming memory, `check_garbage` walks again the collectable objs list and check that they are really unreachable
 
 Why this, again? Because some objs could have been <em>resurrected</em> by a finalizer!
 
-Thanks to PEP 442, since CPython 3.4, the generational gc can safely support finalizers:
-
-- CPython scans the `unreachable` list to execute, when set, all object finalizers
-- As a side effect, a finalizer can <em>resurrect</em> one or more object inside the `unreachable` list
-- If that's the case, the `unreachable` list is merged with the older generation, as it is considered to have survived the collection process
+Thanks to PEP 442, since CPython 3.4, the generational gc can safely support finalizers.
 
 ---
 
-## delete_garbage
+## End of the journey: delete_garbage
 
 <small>
 - break reference cycles by calling the appropriate clear function of the container.
-- when `ob_refcnt` falls to 0, the object memory is finally released
+- when `ob_refcnt` falls to 0, the object memory is immediately released
 
 </small>
 
@@ -1122,10 +698,7 @@ Just read the comment on top of `delete_garbage` :-)
 
 ```c
 /* 
- * Break reference cycles by clearing the containers involved. This
- * is tricky business as the lists can be changing and we don't
- * know which objects may be freed. It is possible I screwed
- * something up here.
+ * ... It is possible I screwed something up here.
  */
 ```
 
@@ -1137,20 +710,12 @@ Garbage collection is hard, indeed.
 
 CPython generational garbage collection is a **stop-the-world** collector: during the entire collection process the program is not making progress
 
-Despite this, the overall performance are acceptable for a general purpose implementation like CPython, due to the following reasons:
+Despite this, the overall performance are acceptable:
 
 - Reference counting plays nicely with generational garbage collector   
-   <small>
-   every deallocation done by the reference counting decreases the objects in a generation, delaying the overcoming of the threshold
-   </small>
 - The generations make the GC **incremental**    
-    <small>
-    The generations "segment" the memory, avoiding an entire heap scan every time the gc kicks in
-    </small>
 - CPython limits full collections with a further heuristic    
-    <small>
-    As we seen, full collections starts only if the number of objects waiting for a full collection exceeds 25% of the objects that survived the last full collection
-    </small>
+    
 
 ???
 Find and debug reference cycles
@@ -1307,21 +872,6 @@ To understand why we need to further inspect the inner details of the marking al
 
 ## Tri-color marking
 
-In an incremental GC, we define three types of object sets:
-
---
-
-- The **white** set    
-    It contains objects that are candidate to be collected
-- The **black** set    
-    It contains all objects that are reachable and that do not have references to objects in the white set
-- The **grey** set    
-    It contains all objects reachable, but still not entirely scanned for references to white objects
-
----
-
-## Tri-color marking
-
 <small>
 During the **tri-color** marking phase, objects:
 
@@ -1428,6 +978,14 @@ Don't miss my talk on the topic at Golab 2019! ;-)
 class: center, middle, inverse
 
 # Thank you for your time!
+
+---
+
+## I'd love to hear from you
+
+- fabio.falzoi84 {gmail.com}
+- github: https://github.com/Pippolo84
+- **extended version** of this talk: https://github.com/Pippolo84/an-insight-into-python-garbage-collection
 
 ---
 
